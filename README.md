@@ -105,43 +105,80 @@ files are never overwritten silently.
 | `siebelOpenUI.knowledgeTokenBudget` | `12000` | Maximum tokens of bundled knowledge grounding supplied per request. |
 | `siebelOpenUI.model` | `"auto"` | Preferred Copilot model family; `auto` lets VS Code choose. |
 
+## Project custom rules (`.github/siebel/`)
 
-## Manual Copilot smoke-test checklist
+A project can extend the built-in coding standards, review rules, and security
+guardrails with its own markdown **custom rule files**, checked in under
+`.github/siebel/` at the workspace root (that folder or any nested subfolder is
+scanned recursively). When present, these files are injected **in full** and
+**take precedence** over the built-in knowledge on conflict; the built-ins stay
+as a fallback for anything the custom files do not cover. When no custom files
+exist, the extension behaves exactly as before.
 
-A real Copilot subscription and an interactive VS Code are required for these
-steps; they cannot be automated here.
+Files are discovered only in the **primary** (first) workspace folder's
+`.github/siebel/` tree. This location is used because the rules are specific to
+the Copilot extension integration and version naturally alongside other
+`.github` configuration.
 
-- [ ] Install the `.vsix` via **Extensions: Install from VSIX...** and reload.
-- [ ] Open Copilot Chat; type `@siebel` and confirm the participant and its six
-      slash-commands appear with descriptions.
-- [ ] With Copilot signed out, run any command and confirm the actionable
-      "GitHub Copilot is required" message appears (no crash).
-- [ ] Sign in to Copilot. Run `@siebel /generate-pm Generate a PM for the
-      Account List Applet` and confirm:
-  - [ ] Code streams into the chat.
-  - [ ] The generated code is ES5 / AMD (`define()`, `typeof` guard,
-        `SiebelJS.Namespace`, `SiebelJS.Extend`, no `let`/`const`/arrow
-        functions).
-  - [ ] A **Write customaccountlistpm.js to siebel/custom/** button appears.
-  - [ ] Clicking it writes the file to `<customBasePath>/siebel/custom/` and the
-        full path is reported.
-- [ ] Re-run the same generation and confirm the modal overwrite prompt appears
-      and that declining leaves the file unchanged.
-- [ ] Open a Siebel JS file in the editor and run `@siebel /reviewer file`;
-      confirm a severity summary table and a PASS / PASS WITH CONDITIONS / FAIL
-      verdict are produced.
-- [ ] In a git repo with pending changes run `@siebel /reviewer diff` and confirm
-      the review uses the working-tree diff. In a folder with no repo, confirm it
-      offers the active-file source instead.
+### Filename scheme
 
-## How it works
+Each file belongs to a **category** (`standards`, `review`, or `security`) and a
+**sub-category** (`js` or `siebel`). The sub-category is encoded in the filename;
+Siebel files additionally encode the target artifact type:
 
-- **Participant:** `vscode.chat.createChatParticipant("siebel.openui", handler)`
-  plus `contributes.chatParticipants` in `package.json`.
-- **Model access:** `vscode.lm.selectChatModels({ vendor: "copilot" })` and
-  `model.sendRequest` with `LanguageModelChatMessage`. The LM API has no system
-  role, so the persona/system prompt is sent as a `User` message.
-- **Grounding:** a static persona→docs baseline map plus keyword scoring, trimmed
-  to `knowledgeTokenBudget` via `model.countTokens`, from the bundled
-  `media/knowledge/` docs.
-- **Standards:** a shared standards fragment is appended to every persona prompt.
+```
+JS:     custom-<category>-js-<label>.md
+Siebel: custom-<category>-siebel-<type>-<label>.md     <type> ∈ pm | pr | pw | cr | any
+```
+
+- `<label>` is free descriptive text (naming only).
+- The prefix and the `<type>` segment are matched **case-insensitively**.
+- A `siebel` file with an unrecognized `<type>` is treated as `any` and a warning
+  is logged.
+- Files that do not match the scheme, or that sit outside `.github/siebel/`, are
+  ignored.
+
+Examples:
+
+```
+.github/siebel/custom-standards-js-es5.md
+.github/siebel/custom-standards-siebel-any-naming.md
+.github/siebel/custom-review-siebel-pm-lifecycle.md
+.github/siebel/custom-security-js-xss.md
+```
+
+### Applicability
+
+- **JS rules always apply**, for every persona and artifact type.
+- **Siebel rules apply by artifact type.** The type is detected from the
+  generation command, then the Siebel base class the code extends
+  (`PresentationModel` → PM, `PhysicalRenderer` → PR, the plug-in-wrapper base →
+  PW, the content-renderer base → CR), then the filename (`...pm.js` → PM, etc.).
+  A Siebel rule is included when its `<type>` is `any` or matches the detected
+  type. When the type cannot be determined, a manual `/reviewer` asks you how to
+  proceed (pick a type, apply all Siebel rules, or skip them), while an
+  auto-review applies all rules.
+- Generation and advisory flows use the **standards** and **security** categories
+  and list the applied files in a short note. The **review** category is used
+  only by `/reviewer`.
+
+### Stepped review
+
+`/reviewer` runs as an ordered sequence of **named steps** — category order
+**standards → review → security**, and within each category **JS before Siebel**.
+Each applicable custom rule file is its own step, labeled by the file's first
+`# H1` heading (or its filename when there is no heading), and ordered
+alphabetically. The built-in JS and Siebel review rules also run as their own
+steps, so reviews work with zero custom files. After every step, a final
+aggregating step produces the severity summary table and the overall
+PASS / PASS WITH CONDITIONS / FAIL verdict.
+
+Sample rule files you can copy are in `docs/examples/github-siebel/`.
+
+## Contributing / development
+
+Building from source, running the unit and integration suites, the manual
+Copilot smoke-test checklist, and an architecture overview live in a separate
+developer guide:
+[`DEVELOPMENT.md`](https://github.com/YajneshPadiyar/siebel-openui/blob/main/siebel-openui-copilot/DEVELOPMENT.md).
+That file is not shipped inside the `.vsix`; it lives in the repository.
